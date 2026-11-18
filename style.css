@@ -1,0 +1,29 @@
+body {
+    font-family: sans-serif;
+    text-align: center;
+    padding-top: 50px;
+    transition: background-color 0.3s;
+    margin: 0;
+}
+body.free { background-color: #e8f5e9; } /* Светло-зеленый */
+body.busy { background-color: #ffebee; } /* Светло-красный */
+
+#toggle-btn {
+    font-size: 1.2em;
+    padding: 15px 30px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    color: white;
+    font-weight: bold;
+    margin-top: 20px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+body.free #toggle-btn { background-color: #4caf50; }
+body.busy #toggle-btn { background-color: #f44336; }
+
+#info {
+    font-size: 1.1em;
+    color: #555;
+    margin-top: 20px;
+}
