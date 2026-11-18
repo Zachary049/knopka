@@ -17,37 +17,90 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const statusRef = ref(db, "accountStatus");
 
-// Получаем элементы со страницы
+// Элементы страницы
 const statusText = document.getElementById("status-text");
 const toggleBtn = document.getElementById("toggle-btn");
 const info = document.getElementById("info");
+const myNameDisplay = document.getElementById("my-name-display");
+const changeNameLink = document.getElementById("change-name");
 
 let currentData = { busy: false };
 
-// Слушаем изменения в базе данных в реальном времени
+// --- ЛОГИКА ИМЕН ---
+// Получаем имя из памяти телефона/браузера. Если нет - спрашиваем.
+let myName = localStorage.getItem("accountUserName");
+
+function askName() {
+    let name = prompt("Как вас зовут? (Чтобы друзья видели, кто занял аккаунт)", myName || "");
+    if (name && name.trim() !== "") {
+        myName = name.trim();
+        localStorage.setItem("accountUserName", myName);
+        myNameDisplay.textContent = myName;
+        updateUI(); // Обновляем кнопку с учетом нового имени
+    } else if (!myName) {
+        // Если отменили ввод и имени нет - ставим Анонима
+        myName = "Аноним";
+        localStorage.setItem("accountUserName", myName);
+        myNameDisplay.textContent = myName;
+    }
+}
+
+if (!myName) {
+    askName();
+} else {
+    myNameDisplay.textContent = myName;
+}
+
+changeNameLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    askName();
+});
+
+// --- ЛОГИКА СТАТУСА ---
 onValue(statusRef, (snapshot) => {
     currentData = snapshot.val() || { busy: false };
-    
-    // Обновляем цвета и текст
+    updateUI();
+});
+
+function updateUI() {
     document.body.className = currentData.busy ? "busy" : "free";
     statusText.textContent = currentData.busy ? "ЗАНЯТ" : "СВОБОДЕН";
-    toggleBtn.textContent = currentData.busy ? "Освободить" : "Занять";
-    toggleBtn.disabled = false;
     
-    if (currentData.busy && currentData.updatedAt) {
+    if (currentData.busy) {
         const time = new Date(currentData.updatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-        info.textContent = `Занял: ${currentData.who || 'Друг'} в ${time}`;
+        info.textContent = `Занял: ${currentData.who || 'Кто-то'} в ${time}`;
+        
+        // Если занял кто-то другой
+        if (currentData.who !== myName) {
+            toggleBtn.textContent = "Занято другим";
+            toggleBtn.disabled = true; // Кнопка неактивна
+        } else {
+            // Если заняли мы
+            toggleBtn.textContent = "Освободить";
+            toggleBtn.disabled = false;
+        }
     } else {
         info.textContent = "";
+        toggleBtn.textContent = "Занять";
+        toggleBtn.disabled = false;
     }
-});
+}
 
 // Обработка нажатия на кнопку
 toggleBtn.addEventListener("click", () => {
-    const newState = !currentData.busy;
-    set(statusRef, {
-        busy: newState,
-        who: newState ? "Друг" : null, 
-        updatedAt: Date.now() 
-    });
+    if (!currentData.busy) {
+        // Занимаем аккаунт
+        set(statusRef, {
+            busy: true,
+            who: myName, 
+            updatedAt: Date.now() 
+        });
+    } else if (currentData.who === myName) {
+        // Освобождаем аккаунт (только если заняли мы)
+        set(statusRef, {
+            busy: false,
+            who: null, 
+            updatedAt: Date.now() 
+        });
+    }
 });
