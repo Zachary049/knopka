@@ -12,7 +12,6 @@ const firebaseConfig = {
   appId: "1:59784956213:web:14bd3a3617d391f823e47c"
 };
 
-// Инициализация Firebase
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const statusRef = ref(db, "accountStatus");
@@ -24,37 +23,54 @@ const info = document.getElementById("info");
 const myNameDisplay = document.getElementById("my-name-display");
 const changeNameLink = document.getElementById("change-name");
 
-let currentData = { busy: false };
+// Элементы для ввода имени
+const userBlock = document.getElementById("user-block");
+const nameEditor = document.getElementById("name-editor");
+const nameInput = document.getElementById("name-input");
+const saveNameBtn = document.getElementById("save-name-btn");
 
-// --- ЛОГИКА ИМЕН ---
-// Получаем имя из памяти телефона/браузера. Если нет - спрашиваем.
+let currentData = { busy: false };
 let myName = localStorage.getItem("accountUserName");
 
-function askName() {
-    let name = prompt("Как вас зовут? (Чтобы друзья видели, кто занял аккаунт)", myName || "");
-    if (name && name.trim() !== "") {
-        myName = name.trim();
+// --- ЛОГИКА ИМЕН ---
+function showNameEditor() {
+    userBlock.style.display = "none";
+    nameEditor.style.display = "block";
+    nameInput.value = myName || "";
+    nameInput.focus();
+}
+
+function saveName() {
+    let newName = nameInput.value.trim();
+    if (newName !== "") {
+        myName = newName;
         localStorage.setItem("accountUserName", myName);
         myNameDisplay.textContent = myName;
-        updateUI(); // Обновляем кнопку с учетом нового имени
-    } else if (!myName) {
-        // Если отменили ввод и имени нет - ставим Анонима
-        myName = "Аноним";
-        localStorage.setItem("accountUserName", myName);
-        myNameDisplay.textContent = myName;
+        nameEditor.style.display = "none";
+        userBlock.style.display = "block";
+        updateUI(); // Пересчитываем, какая должна быть кнопка
     }
 }
 
+// Если имени нет при загрузке - показываем редактор
 if (!myName) {
-    askName();
+    showNameEditor();
 } else {
     myNameDisplay.textContent = myName;
 }
 
+// Обработчики событий для смены имени
 changeNameLink.addEventListener("click", (e) => {
     e.preventDefault();
-    askName();
+    showNameEditor();
 });
+
+saveNameBtn.addEventListener("click", saveName);
+
+nameInput.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") saveName();
+});
+
 
 // --- ЛОГИКА СТАТУСА ---
 onValue(statusRef, (snapshot) => {
@@ -63,6 +79,8 @@ onValue(statusRef, (snapshot) => {
 });
 
 function updateUI() {
+    if (!myName) return; // Если имя еще не введено, не трогаем кнопку
+
     document.body.className = currentData.busy ? "busy" : "free";
     statusText.textContent = currentData.busy ? "ЗАНЯТ" : "СВОБОДЕН";
     
@@ -70,33 +88,37 @@ function updateUI() {
         const time = new Date(currentData.updatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
         info.textContent = `Занял: ${currentData.who || 'Кто-то'} в ${time}`;
         
-        // Если занял кто-то другой
         if (currentData.who !== myName) {
+            // Если занял кто-то другой
             toggleBtn.textContent = "Занято другим";
-            toggleBtn.disabled = true; // Кнопка неактивна
+            toggleBtn.disabled = true; 
         } else {
             // Если заняли мы
             toggleBtn.textContent = "Освободить";
             toggleBtn.disabled = false;
         }
     } else {
+        // Свободно
         info.textContent = "";
         toggleBtn.textContent = "Занять";
         toggleBtn.disabled = false;
     }
 }
 
-// Обработка нажатия на кнопку
+// Клик по кнопке Занять/Освободить
 toggleBtn.addEventListener("click", () => {
+    if (!myName) {
+        showNameEditor();
+        return;
+    }
+
     if (!currentData.busy) {
-        // Занимаем аккаунт
         set(statusRef, {
             busy: true,
             who: myName, 
             updatedAt: Date.now() 
         });
     } else if (currentData.who === myName) {
-        // Освобождаем аккаунт (только если заняли мы)
         set(statusRef, {
             busy: false,
             who: null, 
