@@ -1,22 +1,23 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, onValue, set, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-// 🔥 ВСТАВЬТЕ СЮДА ВАШИ ДАННЫЕ ИЗ FIREBASE 🔥
+// Ваши реальные настройки Firebase
 const firebaseConfig = {
-  apiKey: "ВАШ_API_KEY",
-  authDomain: "ВАШ_ПРОЕКТ.firebaseapp.com",
-  databaseURL: "https://ВАШ_ПРОЕКТ-default-rtdb.firebaseio.com", // Ссылка из Realtime Database
-  projectId: "ВАШ_ПРОЕКТ",
-  storageBucket: "ВАШ_ПРОЕКТ.firebasestorage.app",
-  messagingSenderId: "ВАШ_ID",
-  appId: "ВАШ_APP_ID"
+  apiKey: "AIzaSyCORdHoa6TZDt3eyhNa7V0A46VXnnTJzyk",
+  authDomain: "knopkagpt.firebaseapp.com",
+  databaseURL: "https://knopkagpt-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "knopkagpt",
+  storageBucket: "knopkagpt.firebasestorage.app",
+  messagingSenderId: "59784956213",
+  appId: "1:59784956213:web:14bd3a3617d391f823e47c"
 };
-// 🔥 БОЛЬШЕ НИЧЕГО НЕ МЕНЯЙТЕ 🔥
 
+// Инициализация Firebase
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const statusRef = ref(db, "accountStatus");
 
+// Получаем элементы со страницы
 const statusText = document.getElementById("status-text");
 const toggleBtn = document.getElementById("toggle-btn");
 const info = document.getElementById("info");
@@ -27,15 +28,15 @@ let currentData = { busy: false };
 onValue(statusRef, (snapshot) => {
     currentData = snapshot.val() || { busy: false };
     
-    // Обновляем цвета и текст на экране
+    // Обновляем цвета и текст
     document.body.className = currentData.busy ? "busy" : "free";
     statusText.textContent = currentData.busy ? "ЗАНЯТ" : "СВОБОДЕН";
     toggleBtn.textContent = currentData.busy ? "Освободить" : "Занять";
     toggleBtn.disabled = false;
     
-    if (currentData.busy && currentData.who) {
-        const time = new Date(currentData.updatedAt).toLocaleTimeString();
-        info.textContent = `Занял: ${currentData.who} в ${time}`;
+    if (currentData.busy && currentData.updatedAt) {
+        const time = new Date(currentData.updatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        info.textContent = `Занял: ${currentData.who || 'Друг'} в ${time}`;
     } else {
         info.textContent = "";
     }
@@ -46,7 +47,7 @@ toggleBtn.addEventListener("click", () => {
     const newState = !currentData.busy;
     set(statusRef, {
         busy: newState,
-        who: newState ? "Кто-то из друзей" : null, // Можно вписать своё имя в кавычки
-        updatedAt: Date.now() // Используем Date.now(), чтобы время точно отображалось на телефонах
+        who: newState ? "Друг" : null, 
+        updatedAt: Date.now() 
     });
 });
