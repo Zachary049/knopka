@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getDatabase, ref, onValue, set, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-// Ваши реальные настройки Firebase
+// Твои настройки Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyCORdHoa6TZDt3eyhNa7V0A46VXnnTJzyk",
   authDomain: "knopkagpt.firebaseapp.com",
@@ -16,112 +16,165 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const statusRef = ref(db, "accountStatus");
 
-// Элементы страницы
 const statusText = document.getElementById("status-text");
 const toggleBtn = document.getElementById("toggle-btn");
 const info = document.getElementById("info");
-const myNameDisplay = document.getElementById("my-name-display");
-const changeNameLink = document.getElementById("change-name");
-
-// Элементы для ввода имени
-const userBlock = document.getElementById("user-block");
-const nameEditor = document.getElementById("name-editor");
-const nameInput = document.getElementById("name-input");
-const saveNameBtn = document.getElementById("save-name-btn");
 
 let currentData = { busy: false };
 let myName = localStorage.getItem("accountUserName");
+let wasBusy = false; // Для отслеживания смены статуса
+let lastRequestFrom = ""; // Защита от спама уведомлениями
 
-// --- ЛОГИКА ИМЕН ---
-function showNameEditor() {
-    userBlock.style.display = "none";
-    nameEditor.style.display = "block";
-    nameInput.value = myName || "";
-    nameInput.focus();
-}
-
-function saveName() {
-    let newName = nameInput.value.trim();
-    if (newName !== "") {
-        myName = newName;
-        localStorage.setItem("accountUserName", myName);
-        myNameDisplay.textContent = myName;
-        nameEditor.style.display = "none";
-        userBlock.style.display = "block";
-        updateUI(); // Пересчитываем, какая должна быть кнопка
+// --- УВЕДОМЛЕНИЯ НА ПК ---
+function requestNotificationPermission() {
+    if (!("Notification" in window)) return;
+    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+        Notification.requestPermission();
     }
 }
 
-// Если имени нет при загрузке - показываем редактор
-if (!myName) {
-    showNameEditor();
-} else {
-    myNameDisplay.textContent = myName;
+function sendNotification(title, body) {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") {
+        new Notification(title, { body: body });
+    }
 }
 
-// Обработчики событий для смены имени
-changeNameLink.addEventListener("click", (e) => {
-    e.preventDefault();
-    showNameEditor();
-});
+// --- ИМЕНА ---
+function askName() {
+    let name = prompt("Как вас зовут?");
+    if (name && name.trim() !== "") {
+        myName = name.trim();
+        localStorage.setItem("accountUserName", myName);
+        document.getElementById("my-name-display").textContent = myName;
+        updateUI(currentData.requestFrom || "", currentData.requestStatus || "");
+    }
+}
 
-saveNameBtn.addEventListener("click", saveName);
-
-nameInput.addEventListener("keypress", (e) => {
-    if (e.key === "Enter") saveName();
-});
-
-
-// --- ЛОГИКА СТАТУСА ---
+// --- ЛОГИКА ---
 onValue(statusRef, (snapshot) => {
-    currentData = snapshot.val() || { busy: false };
-    updateUI();
+    const data = snapshot.val() || { busy: false };
+    
+    const requestFrom = data.requestFrom || "";
+    const requestStatus = data.requestStatus || "";
+    
+    // 1. Если мы просили, и нам ответили "declined" (отказ)
+    if (requestFrom === myName && requestStatus === "declined" && currentData.requestStatus !== "declined") {
+        sendNotification("Отказ", `${data.who} ответил: я еще работаю.`);
+        // Сбрасываем запрос в базе
+        update(statusRef, { requestFrom: null, requestStatus: null });
+    }
+
+    // 2. Если мы сидим (busy), а кто-то просит освободить
+    if (data.busy && data.who === myName && requestFrom !== "" && requestFrom !== myName && requestStatus === "pending") {
+        if (requestFrom !== lastRequestFrom) {
+            lastRequestFrom = requestFrom;
+            sendNotification("Запрос на освобождение!", `${requestFrom} просит освободить аккаунт.`);
+            
+            // Спрашиваем пользователя через стандартное окно браузера
+            setTimeout(() => {
+                if (confirm(`${requestFrom} просит освободить аккаунт. Освободить?`)) {
+                    // Нажали "ОК" - освобождаем
+                    update(statusRef, { busy: false, who: null, requestStatus: "accepted" });
+                } else {
+                    // Нажали "Отмена" - отказ
+                    update(statusRef, { requestStatus: "declined" });
+                }
+            }, 500); // Небольшая задержка, чтобы уведомление успело выскочить
+        }
+    } else if (!data.busy) {
+        lastRequestFrom = ""; // Сброс при освобождении
+    }
+
+    // 3. Если мы ставили галочку "уведомить когда свободно"
+    if (wasBusy && !data.busy && document.getElementById("notifyWhenFree")?.checked) {
+        sendNotification("Аккаунт свободен!", "Можно заходить.");
+        document.getElementById("notifyWhenFree").checked = false;
+    }
+
+    wasBusy = data.busy;
+    currentData = data;
+    updateUI(requestFrom, requestStatus);
 });
 
-function updateUI() {
-    if (!myName) return; // Если имя еще не введено, не трогаем кнопку
+function updateUI(requestFrom, requestStatus) {
+    if (!myName) return;
 
     document.body.className = currentData.busy ? "busy" : "free";
     statusText.textContent = currentData.busy ? "ЗАНЯТ" : "СВОБОДЕН";
     
     if (currentData.busy) {
         const time = new Date(currentData.updatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-        info.textContent = `Занял: ${currentData.who || 'Кто-то'} в ${time}`;
         
         if (currentData.who !== myName) {
-            // Если занял кто-то другой
             toggleBtn.textContent = "Занято другим";
             toggleBtn.disabled = true; 
+            
+            if (requestFrom === myName && requestStatus === "pending") {
+                info.innerHTML = `Занял: ${currentData.who} в ${time}<br><b>(Ожидаем ответа...)</b>`;
+            } else {
+                info.innerHTML = `Занял: ${currentData.who} в ${time}<br><button id="req-btn" style="margin-top:5px; padding: 5px 10px; cursor:pointer;">Попросить освободить</button>`;
+                
+                // Привязываем кнопку запроса
+                setTimeout(() => {
+                    document.getElementById("req-btn")?.addEventListener("click", () => {
+                        update(statusRef, { requestFrom: myName, requestStatus: "pending" });
+                    });
+                }, 10);
+            }
         } else {
-            // Если заняли мы
             toggleBtn.textContent = "Освободить";
             toggleBtn.disabled = false;
+            
+            if (requestFrom !== "" && requestFrom !== myName && requestStatus === "pending") {
+                info.innerHTML = `Занял: ${currentData.who} в ${time}<br><b style="color:red;">⚠️ ${requestFrom} просит освободить!</b>`;
+            } else {
+                info.innerHTML = `Занял: ${currentData.who} в ${time}`;
+            }
         }
     } else {
-        // Свободно
         info.textContent = "";
         toggleBtn.textContent = "Занять";
         toggleBtn.disabled = false;
     }
 }
 
-// Клик по кнопке Занять/Освободить
+// Навешиваем кнопки
+document.getElementById("change-name")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    askName();
+});
+
+// Инициализация
+if (!myName) {
+    askName();
+} else {
+    document.getElementById("my-name-display").textContent = myName;
+}
+
 toggleBtn.addEventListener("click", () => {
     if (!myName) {
-        showNameEditor();
+        askName();
         return;
     }
 
     if (!currentData.busy) {
+        // Занимаем
         set(statusRef, {
             busy: true,
             who: myName, 
+            requestFrom: null,
+            requestStatus: null,
             updatedAt: Date.now() 
         });
+        requestNotificationPermission(); // Спросим разрешение на уведомления при первом клике
     } else if (currentData.who === myName) {
+        // Освобождаем
         set(statusRef, {
             busy: false,
             who: null, 
+            requestFrom: null,
+            requestStatus: null,
             updatedAt: Date.now() 
         });
     }
