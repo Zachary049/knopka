@@ -1,7 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, onValue, set, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-// Твои настройки Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyCORdHoa6TZDt3eyhNa7V0A46VXnnTJzyk",
   authDomain: "knopkagpt.firebaseapp.com",
@@ -16,80 +15,97 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const statusRef = ref(db, "accountStatus");
 
-const statusText = document.getElementById("status-text");
-const toggleBtn = document.getElementById("toggle-btn");
-const info = document.getElementById("info");
+const $ = (id) => document.getElementById(id);
+const statusText = $("status-text");
+const toggleBtn = $("toggle-btn");
+const info = $("info");
+const nameEditor = $("name-editor");
+const nameInput = $("name-input");
+const nameDisplay = $("my-name-display");
+const notifyCheckbox = $("notifyWhenFree");
+const notifyLabel = $("notify-label");
+const requestBtn = $("request-btn");
+const requestStatusBox = $("request-status");
+const requestStatusText = $("request-status-text");
 
 let currentData = { busy: false };
-let myName = localStorage.getItem("accountUserName");
-let wasBusy = false; // Для отслеживания смены статуса
-let lastRequestFrom = ""; // Защита от спама уведомлениями
+let myName = null;
+try { myName = localStorage.getItem("accountUserName"); } catch (e) {}
+let wasBusy = false;
+let lastRequestFrom = "";
 
-// --- УВЕДОМЛЕНИЯ НА ПК ---
+/* ================= УВЕДОМЛЕНИЯ ================= */
 function requestNotificationPermission() {
-    if (!("Notification" in window)) return;
-    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
-        Notification.requestPermission();
-    }
+    try {
+        if (!("Notification" in window)) return;
+        if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+            Notification.requestPermission();
+        }
+    } catch (e) { console.warn(e); }
 }
 
 function sendNotification(title, body) {
-    if (!("Notification" in window)) return;
-    if (Notification.permission === "granted") {
-        new Notification(title, { body: body });
-    }
+    try {
+        if (!("Notification" in window)) return;
+        if (Notification.permission !== "granted") return;
+        new Notification(title, { body });
+    } catch (e) { console.warn("Notification failed", e); }
 }
 
-// --- ИМЕНА ---
-function askName() {
-    let name = prompt("Как вас зовут?");
-    if (name && name.trim() !== "") {
-        myName = name.trim();
-        localStorage.setItem("accountUserName", myName);
-        document.getElementById("my-name-display").textContent = myName;
-        updateUI(currentData.requestFrom || "", currentData.requestStatus || "");
-    }
+/* ================= ИМЯ ================= */
+function openNameEditor() {
+    if (!nameEditor) return;
+    nameEditor.style.display = "block";
+    nameInput.value = myName || "";
+    nameInput.focus();
 }
 
-// --- ЛОГИКА ---
+function saveName() {
+    const name = (nameInput?.value || "").trim();
+    if (!name) return;
+    myName = name;
+    try { localStorage.setItem("accountUserName", myName); } catch (e) {}
+    if (nameDisplay) nameDisplay.textContent = myName;
+    if (nameEditor) nameEditor.style.display = "none";
+    updateUI(currentData.requestFrom || "", currentData.requestStatus || "");
+}
+
+/* ================= ОСНОВНАЯ ЛОГИКА ================= */
 onValue(statusRef, (snapshot) => {
     const data = snapshot.val() || { busy: false };
-    
     const requestFrom = data.requestFrom || "";
     const requestStatus = data.requestStatus || "";
-    
-    // 1. Если мы просили, и нам ответили "declined" (отказ)
-    if (requestFrom === myName && requestStatus === "declined" && currentData.requestStatus !== "declined") {
-        sendNotification("Отказ", `${data.who} ответил: я еще работаю.`);
-        // Сбрасываем запрос в базе
+
+    // 1) Нам ответили отказом
+    if (myName && requestFrom === myName && requestStatus === "declined" && currentData.requestStatus !== "declined") {
+        sendNotification("Отказ", `${data.who || "Кто-то"} ответил: я еще работаю.`);
         update(statusRef, { requestFrom: null, requestStatus: null });
     }
 
-    // 2. Если мы сидим (busy), а кто-то просит освободить
-    if (data.busy && data.who === myName && requestFrom !== "" && requestFrom !== myName && requestStatus === "pending") {
+    // 2) Нас просят освободить (мы заняли)
+    if (data.busy && data.who === myName && requestFrom && requestFrom !== myName && requestStatus === "pending") {
         if (requestFrom !== lastRequestFrom) {
             lastRequestFrom = requestFrom;
             sendNotification("Запрос на освобождение!", `${requestFrom} просит освободить аккаунт.`);
-            
-            // Спрашиваем пользователя через стандартное окно браузера
             setTimeout(() => {
-                if (confirm(`${requestFrom} просит освободить аккаунт. Освободить?`)) {
-                    // Нажали "ОК" - освобождаем
+                let ok = false;
+                try { ok = window.confirm(`${requestFrom} просит освободить аккаунт. Освободить?`); }
+                catch (e) { ok = false; }
+                if (ok) {
                     update(statusRef, { busy: false, who: null, requestStatus: "accepted" });
                 } else {
-                    // Нажали "Отмена" - отказ
                     update(statusRef, { requestStatus: "declined" });
                 }
-            }, 500); // Небольшая задержка, чтобы уведомление успело выскочить
+            }, 400);
         }
     } else if (!data.busy) {
-        lastRequestFrom = ""; // Сброс при освобождении
+        lastRequestFrom = "";
     }
 
-    // 3. Если мы ставили галочку "уведомить когда свободно"
-    if (wasBusy && !data.busy && document.getElementById("notifyWhenFree")?.checked) {
+    // 3) Уведомить, когда освободится
+    if (wasBusy && !data.busy && notifyCheckbox?.checked) {
         sendNotification("Аккаунт свободен!", "Можно заходить.");
-        document.getElementById("notifyWhenFree").checked = false;
+        notifyCheckbox.checked = false;
     }
 
     wasBusy = data.busy;
@@ -97,85 +113,125 @@ onValue(statusRef, (snapshot) => {
     updateUI(requestFrom, requestStatus);
 });
 
+/* ================= ОТРИСОВКА UI ================= */
 function updateUI(requestFrom, requestStatus) {
     if (!myName) return;
 
     document.body.className = currentData.busy ? "busy" : "free";
-    statusText.textContent = currentData.busy ? "ЗАНЯТ" : "СВОБОДЕН";
-    
+    if (statusText) statusText.textContent = currentData.busy ? "ЗАНЯТ" : "СВОБОДЕН";
+
     if (currentData.busy) {
-        const time = new Date(currentData.updatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-        
+        const time = currentData.updatedAt
+            ? new Date(currentData.updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+            : "?";
+
+        // Занял кто-то другой
         if (currentData.who !== myName) {
             toggleBtn.textContent = "Занято другим";
-            toggleBtn.disabled = true; 
-            
+            toggleBtn.disabled = true;
+
             if (requestFrom === myName && requestStatus === "pending") {
-                info.innerHTML = `Занял: ${currentData.who} в ${time}<br><b>(Ожидаем ответа...)</b>`;
+                info.innerHTML = `Занял: ${currentData.who || "?"} в ${time}<br><b>(Ожидаем ответа...)</b>`;
             } else {
-                info.innerHTML = `Занял: ${currentData.who} в ${time}<br><button id="req-btn" style="margin-top:5px; padding: 5px 10px; cursor:pointer;">Попросить освободить</button>`;
-                
-                // Привязываем кнопку запроса
-                setTimeout(() => {
-                    document.getElementById("req-btn")?.addEventListener("click", () => {
-                        update(statusRef, { requestFrom: myName, requestStatus: "pending" });
-                    });
-                }, 10);
+                info.innerHTML = `Занял: ${currentData.who || "?"} в ${time}`;
             }
+
+            // Показываем кнопку "Попросить освободить"
+            if (requestFrom === myName && requestStatus === "pending") {
+                requestBtn.style.display = "none";
+                requestStatusBox.style.display = "flex";
+                requestStatusText.textContent = "Ожидаем ответа…";
+            } else if (requestFrom === myName && requestStatus === "declined") {
+                requestBtn.style.display = "inline-block";
+                requestStatusBox.style.display = "none";
+            } else {
+                requestBtn.style.display = "inline-block";
+                requestStatusBox.style.display = "none";
+                requestBtn.disabled = false;
+                requestBtn.textContent = "Попросить освободить";
+            }
+
+            // Чекбокс "уведомить" не нужен, когда занято другим
+            notifyLabel.style.display = "none";
+
         } else {
+            // Заняли мы
             toggleBtn.textContent = "Освободить";
             toggleBtn.disabled = false;
-            
-            if (requestFrom !== "" && requestFrom !== myName && requestStatus === "pending") {
+
+            if (requestFrom && requestFrom !== myName && requestStatus === "pending") {
                 info.innerHTML = `Занял: ${currentData.who} в ${time}<br><b style="color:red;">⚠️ ${requestFrom} просит освободить!</b>`;
             } else {
                 info.innerHTML = `Занял: ${currentData.who} в ${time}`;
             }
+
+            requestBtn.style.display = "none";
+            requestStatusBox.style.display = "none";
+            notifyLabel.style.display = "none";
         }
+
     } else {
+        // Свободно
         info.textContent = "";
         toggleBtn.textContent = "Занять";
         toggleBtn.disabled = false;
+
+        requestBtn.style.display = "none";
+        requestStatusBox.style.display = "none";
+
+        // Чекбокс "уведомить" актуален, когда свободно (но мы ждём, пока занято)
+        notifyLabel.style.display = "flex";
     }
 }
 
-// Навешиваем кнопки
-document.getElementById("change-name")?.addEventListener("click", (e) => {
+/* ================= ОБРАБОТЧИКИ ================= */
+$("change-name")?.addEventListener("click", (e) => {
     e.preventDefault();
-    askName();
+    openNameEditor();
 });
 
-// Инициализация
-if (!myName) {
-    askName();
-} else {
-    document.getElementById("my-name-display").textContent = myName;
-}
+$("save-name-btn")?.addEventListener("click", saveName);
+nameInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); saveName(); }
+});
 
+// Кнопка "Попросить освободить"
+requestBtn?.addEventListener("click", () => {
+    if (!myName || !currentData.busy) return;
+    requestNotificationPermission();
+    update(statusRef, { requestFrom: myName, requestStatus: "pending" });
+    requestBtn.style.display = "none";
+    requestStatusBox.style.display = "flex";
+    requestStatusText.textContent = "Ожидаем ответа…";
+});
+
+// Основная кнопка "Занять / Освободить"
 toggleBtn.addEventListener("click", () => {
-    if (!myName) {
-        askName();
-        return;
-    }
+    if (!myName) { openNameEditor(); return; }
 
     if (!currentData.busy) {
-        // Занимаем
         set(statusRef, {
             busy: true,
-            who: myName, 
+            who: myName,
             requestFrom: null,
             requestStatus: null,
-            updatedAt: Date.now() 
+            updatedAt: Date.now()
         });
-        requestNotificationPermission(); // Спросим разрешение на уведомления при первом клике
+        requestNotificationPermission();
     } else if (currentData.who === myName) {
-        // Освобождаем
         set(statusRef, {
             busy: false,
-            who: null, 
+            who: null,
             requestFrom: null,
             requestStatus: null,
-            updatedAt: Date.now() 
+            updatedAt: Date.now()
         });
     }
 });
+
+/* ================= ИНИЦИАЛИЗАЦИЯ ================= */
+if (!myName) {
+    openNameEditor();
+} else if (nameDisplay) {
+    nameDisplay.textContent = myName;
+}
