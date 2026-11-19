@@ -48,3 +48,79 @@ body.busy #toggle-btn { background-color: #f44336; }
     color: #2196f3;
     text-decoration: none;
 }
+/* --- Блок действий --- */
+.actions {
+    margin-top: 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+}
+
+.action-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #fff;
+    padding: 10px 16px;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    cursor: pointer;
+    font-size: 0.95em;
+    color: #444;
+    user-select: none;
+}
+
+.action-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #4caf50;
+    cursor: pointer;
+}
+
+.action-btn {
+    padding: 12px 22px;
+    border: none;
+    border-radius: 8px;
+    background: #ff9800;
+    color: white;
+    font-weight: bold;
+    font-size: 1em;
+    cursor: pointer;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    transition: background 0.2s, transform 0.1s;
+}
+
+.action-btn:hover { background: #fb8c00; }
+.action-btn:active { transform: scale(0.97); }
+.action-btn:disabled {
+    background: #bdbdbd;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+/* --- Статус запроса --- */
+.request-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ff9800;
+    font-size: 0.95em;
+    font-weight: bold;
+    background: #fff3e0;
+    padding: 8px 16px;
+    border-radius: 8px;
+}
+
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #ffcc80;
+    border-top-color: #ff9800;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
