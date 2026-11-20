@@ -1,10 +1,12 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, onValue, set, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+// ДОБАВЛЕНА ФУНКЦИЯ get В ИМПОРТ
+import { getDatabase, ref, onValue, set, update, get } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCORdHoa6TZDt3eyhNa7V0A46VXnnTJzyk",
   authDomain: "knopkagpt.firebaseapp.com",
-  databaseURL: "https://knopkagpt-default-rtdb.europe-west1.firebasedatabase.app",
+  // ИЗМЕНЕНО НА wss:// ДЛЯ БЫСТРОГО WEBSOCKET
+  databaseURL: "wss://knopkagpt-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "knopkagpt",
   storageBucket: "knopkagpt.firebasestorage.app",
   messagingSenderId: "59784956213",
@@ -235,3 +237,16 @@ if (!myName) {
 } else if (nameDisplay) {
     nameDisplay.textContent = myName;
 }
+
+/* ================= ПРИНУДИТЕЛЬНАЯ СИНХРОНИЗАЦИЯ ================= */
+// Когда приложение разворачивается на экране, принудительно запрашиваем данные
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+        get(statusRef).then((snapshot) => {
+            const data = snapshot.val() || { busy: false };
+            // Принудительно обновляем интерфейс свежими данными
+            currentData = data;
+            updateUI(data.requestFrom || "", data.requestStatus || "");
+        }).catch(err => console.warn("Sync error:", err));
+    }
+});
