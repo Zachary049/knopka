@@ -86,6 +86,7 @@ onValue(statusRef, (snapshot) => {
                 if (confirm(`${requestFrom} просит освободить аккаунт. Освободить?`)) {
                     if (sessionStartTime > 0) {
                         set(ref(db, "sessions/" + myName), {
+                            who: myName, 
                             startTime: sessionStartTime,
                             endTime: Date.now()
                         });
@@ -192,6 +193,7 @@ toggleBtn.addEventListener("click", () => {
     } else if (currentData.who === myName) {
         if (sessionStartTime > 0) {
             set(ref(db, "sessions/" + myName), {
+                who: myName, 
                 startTime: sessionStartTime,
                 endTime: Date.now()
             });
