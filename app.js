@@ -1,12 +1,11 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-// ДОБАВЛЕНА ФУНКЦИЯ get В ИМПОРТ
 import { getDatabase, ref, onValue, set, update, get } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCORdHoa6TZDt3eyhNa7V0A46VXnnTJzyk",
   authDomain: "knopkagpt.firebaseapp.com",
-  // ИЗМЕНЕНО НА wss:// ДЛЯ БЫСТРОГО WEBSOCKET
-  databaseURL: "wss://knopkagpt-default-rtdb.europe-west1.firebasedatabase.app",
+  // ВОЗВРАЩАЕМ ПРАВИЛЬНУЮ ССЫЛКУ!
+  databaseURL: "https://knopkagpt-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "knopkagpt",
   storageBucket: "knopkagpt.firebasestorage.app",
   messagingSenderId: "59784956213",
@@ -62,14 +61,40 @@ function openNameEditor() {
     nameInput.focus();
 }
 
+// ОБНОВЛЕННАЯ ФУНКЦИЯ СОХРАНЕНИЯ ИМЕНИ (С ЗАПИСЬЮ В FIREBASE)
 function saveName() {
     const name = (nameInput?.value || "").trim();
     if (!name) return;
-    myName = name;
-    try { localStorage.setItem("accountUserName", myName); } catch (e) {}
-    if (nameDisplay) nameDisplay.textContent = myName;
-    if (nameEditor) nameEditor.style.display = "none";
-    updateUI(currentData.requestFrom || "", currentData.requestStatus || "");
+
+    // Проверяем, не занято ли это имя в базе
+    const usersRef = ref(db, "users");
+    get(usersRef).then((snapshot) => {
+        const users = snapshot.val() || {};
+        
+        // Если имя уже есть в базе и это не наше старое имя
+        if (users[name] && name !== myName) {
+            alert(`Имя "${name}" уже занято кем-то другим! Выберите другое.`);
+            return; // Прерываем сохранение
+        }
+
+        // Если меняем имя, удаляем старое из базы
+        if (myName && myName !== name) {
+            set(ref(db, "users/" + myName), null);
+        }
+
+        myName = name;
+        try { localStorage.setItem("accountUserName", myName); } catch (e) {}
+        if (nameDisplay) nameDisplay.textContent = myName;
+        if (nameEditor) nameEditor.style.display = "none";
+        
+        // ЗАПИСЫВАЕМ НОВОЕ ИМЯ В БАЗУ
+        set(ref(db, "users/" + myName), true);
+        
+        updateUI(currentData.requestFrom || "", currentData.requestStatus || "");
+    }).catch(err => {
+        console.error("Ошибка проверки имени:", err);
+        alert("Ошибка подключения к базе. Попробуйте еще раз.");
+    });
 }
 
 /* ================= ОСНОВНАЯ ЛОГИКА ================= */
@@ -127,7 +152,6 @@ function updateUI(requestFrom, requestStatus) {
             ? new Date(currentData.updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
             : "?";
 
-        // Занял кто-то другой
         if (currentData.who !== myName) {
             toggleBtn.textContent = "Занято другим";
             toggleBtn.disabled = true;
@@ -138,7 +162,6 @@ function updateUI(requestFrom, requestStatus) {
                 info.innerHTML = `Занял: ${currentData.who || "?"} в ${time}`;
             }
 
-            // Показываем кнопку "Попросить освободить"
             if (requestFrom === myName && requestStatus === "pending") {
                 requestBtn.style.display = "none";
                 requestStatusBox.style.display = "flex";
@@ -152,12 +175,9 @@ function updateUI(requestFrom, requestStatus) {
                 requestBtn.disabled = false;
                 requestBtn.textContent = "Попросить освободить";
             }
-
-            // Чекбокс "уведомить" не нужен, когда занято другим
             notifyLabel.style.display = "none";
 
         } else {
-            // Заняли мы
             toggleBtn.textContent = "Освободить";
             toggleBtn.disabled = false;
 
@@ -173,15 +193,12 @@ function updateUI(requestFrom, requestStatus) {
         }
 
     } else {
-        // Свободно
         info.textContent = "";
         toggleBtn.textContent = "Занять";
         toggleBtn.disabled = false;
 
         requestBtn.style.display = "none";
         requestStatusBox.style.display = "none";
-
-        // Чекбокс "уведомить" актуален, когда свободно (но мы ждём, пока занято)
         notifyLabel.style.display = "flex";
     }
 }
@@ -236,15 +253,16 @@ if (!myName) {
     openNameEditor();
 } else if (nameDisplay) {
     nameDisplay.textContent = myName;
+    // СИНХРОНИЗАЦИЯ ИМЕНИ ПРИ ЗАГРУЗКЕ
+    // Если ты уже заходил раньше, при загрузке сайта имя автоматически добавится в базу
+    set(ref(db, "users/" + myName), true);
 }
 
 /* ================= ПРИНУДИТЕЛЬНАЯ СИНХРОНИЗАЦИЯ ================= */
-// Когда приложение разворачивается на экране, принудительно запрашиваем данные
 document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
         get(statusRef).then((snapshot) => {
             const data = snapshot.val() || { busy: false };
-            // Принудительно обновляем интерфейс свежими данными
             currentData = data;
             updateUI(data.requestFrom || "", data.requestStatus || "");
         }).catch(err => console.warn("Sync error:", err));
