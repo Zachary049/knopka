@@ -4,7 +4,6 @@ import { getDatabase, ref, onValue, set, update, get } from "https://www.gstatic
 const firebaseConfig = {
   apiKey: "AIzaSyCORdHoa6TZDt3eyhNa7V0A46VXnnTJzyk",
   authDomain: "knopkagpt.firebaseapp.com",
-  // ВОЗВРАЩАЕМ ПРАВИЛЬНУЮ ССЫЛКУ!
   databaseURL: "https://knopkagpt-default-rtdb.europe-west1.firebasedatabase.app",
   projectId: "knopkagpt",
   storageBucket: "knopkagpt.firebasestorage.app",
@@ -16,123 +15,96 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 const statusRef = ref(db, "accountStatus");
 
-const $ = (id) => document.getElementById(id);
-const statusText = $("status-text");
-const toggleBtn = $("toggle-btn");
-const info = $("info");
-const nameEditor = $("name-editor");
-const nameInput = $("name-input");
-const nameDisplay = $("my-name-display");
-const notifyCheckbox = $("notifyWhenFree");
-const notifyLabel = $("notify-label");
-const requestBtn = $("request-btn");
-const requestStatusBox = $("request-status");
-const requestStatusText = $("request-status-text");
+const statusText = document.getElementById("status-text");
+const toggleBtn = document.getElementById("toggle-btn");
+const info = document.getElementById("info");
+const notifyCheckbox = document.getElementById("notify-when-free");
+const checkboxContainer = document.getElementById("checkbox-container");
 
 let currentData = { busy: false };
-let myName = null;
-try { myName = localStorage.getItem("accountUserName"); } catch (e) {}
-let wasBusy = false;
+let myName = localStorage.getItem("accountUserName");
+let wasBusy = false; 
 let lastRequestFrom = "";
+let sessionStartTime = 0; 
 
-/* ================= УВЕДОМЛЕНИЯ ================= */
+// --- УВЕДОМЛЕНИЯ ---
 function requestNotificationPermission() {
-    try {
-        if (!("Notification" in window)) return;
-        if (Notification.permission !== "granted" && Notification.permission !== "denied") {
-            Notification.requestPermission();
-        }
-    } catch (e) { console.warn(e); }
+    if (!("Notification" in window)) return;
+    if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+        Notification.requestPermission();
+    }
 }
 
 function sendNotification(title, body) {
-    try {
-        if (!("Notification" in window)) return;
-        if (Notification.permission !== "granted") return;
-        new Notification(title, { body });
-    } catch (e) { console.warn("Notification failed", e); }
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") {
+        new Notification(title, { body: body });
+    }
 }
 
-/* ================= ИМЯ ================= */
-function openNameEditor() {
-    if (!nameEditor) return;
-    nameEditor.style.display = "block";
-    nameInput.value = myName || "";
-    nameInput.focus();
+// --- ИМЕНА ---
+function askName() {
+    let name = prompt("Как вас зовут?");
+    if (name && name.trim() !== "") {
+        const newName = name.trim();
+        const usersRef = ref(db, "users");
+        onValue(usersRef, (snapshot) => {
+            const users = snapshot.val() || {};
+            if (users[newName] && newName !== myName) {
+                alert(`Имя "${newName}" уже занято кем-то другим! Выберите другое.`);
+                askName();
+                return;
+            }
+            myName = newName;
+            localStorage.setItem("accountUserName", myName);
+            document.getElementById("my-name-display").textContent = myName;
+            set(ref(db, "users/" + myName), true);
+            updateUI(currentData.requestFrom || "", currentData.requestStatus || "");
+        }, { onlyOnce: true });
+    }
 }
 
-// ОБНОВЛЕННАЯ ФУНКЦИЯ СОХРАНЕНИЯ ИМЕНИ (С ЗАПИСЬЮ В FIREBASE)
-function saveName() {
-    const name = (nameInput?.value || "").trim();
-    if (!name) return;
-
-    // Проверяем, не занято ли это имя в базе
-    const usersRef = ref(db, "users");
-    get(usersRef).then((snapshot) => {
-        const users = snapshot.val() || {};
-        
-        // Если имя уже есть в базе и это не наше старое имя
-        if (users[name] && name !== myName) {
-            alert(`Имя "${name}" уже занято кем-то другим! Выберите другое.`);
-            return; // Прерываем сохранение
-        }
-
-        // Если меняем имя, удаляем старое из базы
-        if (myName && myName !== name) {
-            set(ref(db, "users/" + myName), null);
-        }
-
-        myName = name;
-        try { localStorage.setItem("accountUserName", myName); } catch (e) {}
-        if (nameDisplay) nameDisplay.textContent = myName;
-        if (nameEditor) nameEditor.style.display = "none";
-        
-        // ЗАПИСЫВАЕМ НОВОЕ ИМЯ В БАЗУ
-        set(ref(db, "users/" + myName), true);
-        
-        updateUI(currentData.requestFrom || "", currentData.requestStatus || "");
-    }).catch(err => {
-        console.error("Ошибка проверки имени:", err);
-        alert("Ошибка подключения к базе. Попробуйте еще раз.");
-    });
-}
-
-/* ================= ОСНОВНАЯ ЛОГИКА ================= */
+// --- ЛОГИКА СТАТУСА ---
 onValue(statusRef, (snapshot) => {
     const data = snapshot.val() || { busy: false };
     const requestFrom = data.requestFrom || "";
     const requestStatus = data.requestStatus || "";
-
-    // 1) Нам ответили отказом
-    if (myName && requestFrom === myName && requestStatus === "declined" && currentData.requestStatus !== "declined") {
-        sendNotification("Отказ", `${data.who || "Кто-то"} ответил: я еще работаю.`);
+    
+    // Обработка отказа
+    if (requestFrom === myName && requestStatus === "declined" && currentData.requestStatus !== "declined") {
+        sendNotification("Отказ", `${data.who} ответил: я еще работаю.`);
         update(statusRef, { requestFrom: null, requestStatus: null });
     }
 
-    // 2) Нас просят освободить (мы заняли)
-    if (data.busy && data.who === myName && requestFrom && requestFrom !== myName && requestStatus === "pending") {
+    // Обработка запроса (если мы заняли место)
+    if (data.busy && data.who === myName && requestFrom !== "" && requestFrom !== myName && requestStatus === "pending") {
         if (requestFrom !== lastRequestFrom) {
             lastRequestFrom = requestFrom;
             sendNotification("Запрос на освобождение!", `${requestFrom} просит освободить аккаунт.`);
+            
             setTimeout(() => {
-                let ok = false;
-                try { ok = window.confirm(`${requestFrom} просит освободить аккаунт. Освободить?`); }
-                catch (e) { ok = false; }
-                if (ok) {
+                if (confirm(`${requestFrom} просит освободить аккаунт. Освободить?`)) {
+                    if (sessionStartTime > 0) {
+                        set(ref(db, "sessions/" + myName), {
+                            startTime: sessionStartTime,
+                            endTime: Date.now()
+                        });
+                        sessionStartTime = 0;
+                    }
                     update(statusRef, { busy: false, who: null, requestStatus: "accepted" });
                 } else {
                     update(statusRef, { requestStatus: "declined" });
                 }
-            }, 400);
+            }, 500); 
         }
     } else if (!data.busy) {
-        lastRequestFrom = "";
+        lastRequestFrom = ""; 
     }
 
-    // 3) Уведомить, когда освободится
-    if (wasBusy && !data.busy && notifyCheckbox?.checked) {
+    // УВЕДОМЛЕНИЕ ОБ ОСВОБОЖДЕНИИ (галочка)
+    if (wasBusy && !data.busy && notifyCheckbox.checked) {
         sendNotification("Аккаунт свободен!", "Можно заходить.");
-        notifyCheckbox.checked = false;
+        notifyCheckbox.checked = false; // Снимаем галочку после срабатывания
     }
 
     wasBusy = data.busy;
@@ -140,131 +112,145 @@ onValue(statusRef, (snapshot) => {
     updateUI(requestFrom, requestStatus);
 });
 
-/* ================= ОТРИСОВКА UI ================= */
 function updateUI(requestFrom, requestStatus) {
     if (!myName) return;
 
     document.body.className = currentData.busy ? "busy" : "free";
-    if (statusText) statusText.textContent = currentData.busy ? "ЗАНЯТ" : "СВОБОДЕН";
-
+    statusText.textContent = currentData.busy ? "ЗАНЯТ" : "СВОБОДЕН";
+    
     if (currentData.busy) {
-        const time = currentData.updatedAt
-            ? new Date(currentData.updatedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
-            : "?";
-
+        const time = new Date(currentData.updatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        
         if (currentData.who !== myName) {
             toggleBtn.textContent = "Занято другим";
-            toggleBtn.disabled = true;
+            toggleBtn.disabled = true; 
+            
+            // Показываем галочку только если занято другим
+            checkboxContainer.style.display = "block"; 
 
             if (requestFrom === myName && requestStatus === "pending") {
-                info.innerHTML = `Занял: ${currentData.who || "?"} в ${time}<br><b>(Ожидаем ответа...)</b>`;
+                info.innerHTML = `Занял: ${currentData.who} в ${time}<br><b>(Ожидаем ответа...)</b>`;
             } else {
-                info.innerHTML = `Занял: ${currentData.who || "?"} в ${time}`;
+                info.innerHTML = `Занял: ${currentData.who} в ${time}<br><button id="req-btn" style="margin-top:5px; padding: 5px 10px; cursor:pointer;">Попросить освободить</button>`;
+                setTimeout(() => {
+                    document.getElementById("req-btn")?.addEventListener("click", () => {
+                        update(statusRef, { requestFrom: myName, requestStatus: "pending" });
+                    });
+                }, 10);
             }
-
-            if (requestFrom === myName && requestStatus === "pending") {
-                requestBtn.style.display = "none";
-                requestStatusBox.style.display = "flex";
-                requestStatusText.textContent = "Ожидаем ответа…";
-            } else if (requestFrom === myName && requestStatus === "declined") {
-                requestBtn.style.display = "inline-block";
-                requestStatusBox.style.display = "none";
-            } else {
-                requestBtn.style.display = "inline-block";
-                requestStatusBox.style.display = "none";
-                requestBtn.disabled = false;
-                requestBtn.textContent = "Попросить освободить";
-            }
-            notifyLabel.style.display = "none";
-
         } else {
             toggleBtn.textContent = "Освободить";
             toggleBtn.disabled = false;
+            
+            // Скрываем галочку, если мы сами заняли
+            checkboxContainer.style.display = "none";
+            notifyCheckbox.checked = false;
 
-            if (requestFrom && requestFrom !== myName && requestStatus === "pending") {
+            if (requestFrom !== "" && requestFrom !== myName && requestStatus === "pending") {
                 info.innerHTML = `Занял: ${currentData.who} в ${time}<br><b style="color:red;">⚠️ ${requestFrom} просит освободить!</b>`;
             } else {
                 info.innerHTML = `Занял: ${currentData.who} в ${time}`;
             }
-
-            requestBtn.style.display = "none";
-            requestStatusBox.style.display = "none";
-            notifyLabel.style.display = "none";
         }
-
     } else {
         info.textContent = "";
         toggleBtn.textContent = "Занять";
         toggleBtn.disabled = false;
-
-        requestBtn.style.display = "none";
-        requestStatusBox.style.display = "none";
-        notifyLabel.style.display = "flex";
+        checkboxContainer.style.display = "none";
     }
 }
 
-/* ================= ОБРАБОТЧИКИ ================= */
-$("change-name")?.addEventListener("click", (e) => {
+// --- КНОПКИ ---
+document.getElementById("change-name")?.addEventListener("click", (e) => {
     e.preventDefault();
-    openNameEditor();
+    askName();
 });
 
-$("save-name-btn")?.addEventListener("click", saveName);
-nameInput?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); saveName(); }
-});
+if (!myName) {
+    askName();
+} else {
+    document.getElementById("my-name-display").textContent = myName;
+}
 
-// Кнопка "Попросить освободить"
-requestBtn?.addEventListener("click", () => {
-    if (!myName || !currentData.busy) return;
-    requestNotificationPermission();
-    update(statusRef, { requestFrom: myName, requestStatus: "pending" });
-    requestBtn.style.display = "none";
-    requestStatusBox.style.display = "flex";
-    requestStatusText.textContent = "Ожидаем ответа…";
-});
-
-// Основная кнопка "Занять / Освободить"
+// Клик по "Занять/Освободить"
 toggleBtn.addEventListener("click", () => {
-    if (!myName) { openNameEditor(); return; }
+    if (!myName) {
+        askName();
+        return;
+    }
 
     if (!currentData.busy) {
+        sessionStartTime = Date.now(); 
         set(statusRef, {
             busy: true,
-            who: myName,
+            who: myName, 
             requestFrom: null,
             requestStatus: null,
-            updatedAt: Date.now()
+            updatedAt: Date.now() 
         });
         requestNotificationPermission();
     } else if (currentData.who === myName) {
+        if (sessionStartTime > 0) {
+            set(ref(db, "sessions/" + myName), {
+                startTime: sessionStartTime,
+                endTime: Date.now()
+            });
+            sessionStartTime = 0; 
+        }
         set(statusRef, {
             busy: false,
-            who: null,
+            who: null, 
             requestFrom: null,
             requestStatus: null,
-            updatedAt: Date.now()
+            updatedAt: Date.now() 
         });
     }
 });
 
-/* ================= ИНИЦИАЛИЗАЦИЯ ================= */
-if (!myName) {
-    openNameEditor();
-} else if (nameDisplay) {
-    nameDisplay.textContent = myName;
-    // СИНХРОНИЗАЦИЯ ИМЕНИ ПРИ ЗАГРУЗКЕ
-    // Если ты уже заходил раньше, при загрузке сайта имя автоматически добавится в базу
-    set(ref(db, "users/" + myName), true);
-}
+// --- ИСТОРИЯ СЕССИЙ (МОДАЛЬНОЕ ОКНО) ---
+const historyBtn = document.getElementById("history-btn");
+const historyModal = document.getElementById("history-modal");
+const closeHistoryBtn = document.getElementById("close-history");
+const historyList = document.getElementById("history-list");
 
-/* ================= ПРИНУДИТЕЛЬНАЯ СИНХРОНИЗАЦИЯ ================= */
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
-        get(statusRef).then((snapshot) => {
-            const data = snapshot.val() || { busy: false };
-            currentData = data;
-            updateUI(data.requestFrom || "", data.requestStatus || "");
-        }).catch(err => console.warn("Sync error:", err));
-    }
+historyBtn.addEventListener("click", () => {
+    historyList.innerHTML = "<p>Загрузка...</p>";
+    historyModal.style.display = "flex";
+
+    const sessionsRef = ref(db, "sessions");
+    get(sessionsRef).then((snapshot) => {
+        if (snapshot.exists()) {
+            const data = snapshot.val();
+            historyList.innerHTML = "";
+            
+            // Превращаем объект в массив и сортируем по времени окончания (новые сверху)
+            const sessionsArray = Object.values(data).sort((a, b) => b.endTime - a.endTime);
+
+            sessionsArray.forEach(session => {
+                const start = new Date(session.startTime).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+                const end = new Date(session.endTime).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                
+                // Считаем длительность в минутах
+                const durationMin = Math.round((session.endTime - session.startTime) / 60000);
+
+                const div = document.createElement("div");
+                div.className = "history-item";
+                div.innerHTML = `
+                    <b>${session.who || "Неизвестный"}</b><br>
+                    Занял: ${start}<br>
+                    Освободил: ${end}<br>
+                    <i>(Длительность: ${durationMin} мин.)</i>
+                `;
+                historyList.appendChild(div);
+            });
+        } else {
+            historyList.innerHTML = "<p>История пуста.</p>";
+        }
+    }).catch((error) => {
+        historyList.innerHTML = "<p>Ошибка загрузки истории.</p>";
+    });
+});
+
+closeHistoryBtn.addEventListener("click", () => {
+    historyModal.style.display = "none";
 });
